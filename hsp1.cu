@@ -15,7 +15,7 @@
 //#include "device_launch_parameters.h"
 #include <time.h>
 
-#define N 3200
+#define N 1024//3200 test with multiplication
 #define MAX_ERR 1e-6
 
 
@@ -79,6 +79,7 @@ void MatrixMult(float* M1, float* M2, float* Mout, int n) {
 }
 
 
+
 __global__ void cudaMatrixMult(float* M1, float* M2, float* Mout, int n) {
 	int row = blockIdx.y * blockDim.y + threadIdx.y;
 	int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -97,6 +98,29 @@ __global__ void cudaMatrixMult(float* M1, float* M2, float* Mout, int n) {
 
 
 
+
+
+__global__ void convolution_kernel(float* output, float* input, float* filter,int size_image,int size_kernel) {
+
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int i, j;
+	float sum = 0.0;
+	int filter_width = size_kernel;
+	int filter_height = size_kernel;
+	int image_width = size_image;
+	int image_height = size_image;
+	if (y < image_height && x < image_width) {
+
+		for (j = 0; j < filter_height; j++) {
+			for (i = 0; i < filter_width; i++) {
+				sum += input[(y + j) * image_width + (x + i)] * filter[j * filter_width + i];
+			}
+		}
+
+		output[y * image_width + x] = sum;
+	}
+}
 
 int main() {
 	
@@ -214,7 +238,7 @@ int main() {
 	MatrixPrint(out1, 2, 2); // just print first 4 numbers
 	printf("res2\n");
 	MatrixPrint(out2, 2, 2); // just print first 4 numbers
-	*/
+	
 	for (int i = 0; i < N * N; i++) {
 		error = out1[i] - out2[i];
 		//printf("error %f\n", error);
@@ -230,5 +254,56 @@ int main() {
 	*/
 
 
-	
+float* a2, * kernel, * out3, * out4;
+float* d_a2, * d_kernel, * d_out3, * d_out4;
+
+
+//clock_t t;
+//t = clock();
+
+
+// Allocate memory
+a2 = (float*)malloc(sizeof(float) * N * N);
+int kernel_size = 7;
+kernel = (float*)malloc(sizeof(float) * kernel_size * kernel_size);
+out3 = (float*)malloc(sizeof(float) * N * N);
+out4 = (float*)malloc(sizeof(float) * N * N);
+//MatrixInit(a1, N, N);
+//MatrixInit(b1, N, N);
+MatrixInit_value(a2, N, N, 1.);
+MatrixInit_value(kernel, kernel_size, kernel_size, 1.);
+//b1[3] = 0.;
+
+
+
+cudaMalloc((void**)&d_a2, sizeof(float)* N* N);
+cudaMalloc((void**)&d_kernel, sizeof(float)* kernel_size* kernel_size);
+//cudaMalloc((void**)&d_out1, sizeof(float) * N * N);
+cudaMalloc((void**)&d_out4, sizeof(float)* N* N);
+
+cudaMemcpy(d_a2, a2, sizeof(float)* N* N, cudaMemcpyHostToDevice);
+cudaMemcpy(d_kernel, kernel, sizeof(float)* kernel_size* kernel_size, cudaMemcpyHostToDevice);
+//int THREADS = 16;
+//int BLOCKS = (N + THREADS - 1) / THREADS;
+int THREADS = 32;
+
+// Blocks per grid dimension (assumes THREADS divides N evenly)
+int BLOCKS = ceil(N / THREADS);
+
+
+// Use dim3 structs for block  and grid dimensions
+dim3 threads(THREADS, THREADS);
+dim3 blocks(BLOCKS, BLOCKS);
+
+// Launch kernel
+//conv2d<< <blocks, threads >> > (d_a2, d_kernel, d_out4, N);
+convolution_kernel<<<blocks, threads>>>(d_out4, d_a2, d_kernel, N,7);
+cudaMemcpy(out4, d_out4, sizeof(float)* N* N, cudaMemcpyDeviceToHost);
+
+MatrixPrint(out4, 20, 20); // just print first 4 numbers
+MatrixPrint(kernel, 7, 7); // just print first 4 numbers
+
+cudaFree(d_a2);
+cudaFree(d_kernel);
+cudaFree(d_out4);
 }
