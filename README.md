@@ -28,4 +28,4 @@ After the first convolution, I also add the tanh as nonlinear activation functio
 ## TODO
 
 The next step is to use [`LeNet5.ipynb`] to train the model and to use its parameters in the cuda implementation, and to finish the rest of the implemention of the CNN,
-they are compsed of another convolution (5,5) and average pooling (2,2) aand two other dense layers with are just composed of a matrix multiplication and an addition for the bias.
+they are compsed of another convolution (5,5) and average pooling (2,2) and two other dense layers with are just composed of a matrix multiplication and an addition for the bias.
