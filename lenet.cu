@@ -23,22 +23,20 @@
 
 
 
-void MatrixInit(float* M, int n, int p) {
-	float LO = -1.;
+void MatrixInit(float* M, int n) {
+	float LO = 0.;
 	float HI = 1;
 	for (int i = 0; i < n; i++) {
-		for (int j = 0; j < p; j++) {
 			float rd = LO + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (HI - LO)));
-			M[n * i + j] = rd;
-		}
+			M[i] = rd;
+		
 	}
 }
-void MatrixInit_value(float* M, int n, int p,float value) {
+void MatrixInit_value(float* M, int n,float value) {
 
 	for (int i = 0; i < n; i++) {
-		for (int j = 0; j < p; j++) {
-			M[n * i + j] = value;
-		}
+			M[i] = value;
+		
 	}
 }
 
@@ -122,153 +120,142 @@ __global__ void convolution_kernel(float* output, float* input, float* filter,in
 	}
 }
 
+__global__ void activation_tanh(float* M, float n) {
+	int i = (blockIdx.x * blockDim.x) + threadIdx.x;
+	if (i < n ) {
+		float res = tanhf(M[1]);
+		M[i] = res;
+	}
+}
+
 int main() {
-	
-	/*  
-	 //Allocate memory for our matrices
-	float * a, * b, * out;
-	float* d_a, * d_b, * d_out;
 
-	// Allocate memory
-	a = (float*)malloc(sizeof(float) * N*N);
-	b = (float*)malloc(sizeof(float) * N*N);
-	out = (float*)malloc(sizeof(float) * N*N);
-	MatrixInit(a, N,N);
-	MatrixInit(b,N,N);
-	printf("matrix 1");
-	//MatrixPrint(a, 2,2); // just print first 4 numbers
-	//printf("a[0] = %f\n", a[0]);
+// ===>   LeNet-5
+float* raw_data, * C1_data, * S1_data, * C1_kernel;
+float* d_raw_data, * d_C1_data, * d_S1_data, * d_C1_kernel;
 
-	// ===>  Matrix add cpu
-
-	MatrixAdd(a, b, out, N, N);
-
-	// ===> Matrix add GPU
-
-	cudaMalloc((void**)&d_a, sizeof(float) * N*N);
-	cudaMalloc((void**)&d_b, sizeof(float) * N*N);
-	cudaMalloc((void**)&d_out, sizeof(float) * N*N);
-
-	cudaMemcpy(d_a, a, sizeof(float) * N*N, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_b, b, sizeof(float) * N*N, cudaMemcpyHostToDevice);
-	int NUM_THREADS = 1 << 10;
-	int NUM_BLOCKS = (N + NUM_THREADS - 1) / NUM_THREADS;
-	cudaMatrixAdd<<<NUM_BLOCKS, NUM_THREADS>>>(d_a, d_b, d_out, N,N);
-
-	cudaMemcpy(out, d_out, sizeof(float) * N, cudaMemcpyDeviceToHost);
-	for (int i = 0; i < N*N; i++) {
-		assert(fabs(out[i] - a[i] - b[i]) < MAX_ERR);
-	}
-	printf("PASSED\n");
-	cudaFree(d_a);
-	cudaFree(d_b);
-	cudaFree(d_out);
-	*/
-
-	/*
-	float* a1, * b1, * out1, * out2;
-	float* d_a1, * d_b1, * d_out1, * d_out2;
+int size_img = 32;
+raw_data = (float*)malloc(sizeof(float) * size_img * size_img); //image
+MatrixInit(raw_data, size_img * size_img);
+printf("raw img \n");
+MatrixPrint(raw_data, 10, 10); // just print first 10 numbers
+printf("\n");
 
 
-	clock_t t;
-	t = clock();
+int size_c1 = 28;
+int size_channel_c1 = 1;
+C1_data = (float*)malloc(sizeof(float) * size_c1 * size_c1 * size_channel_c1); //1st conv
+MatrixInit_value(C1_data, size_c1 * size_c1 * size_channel_c1, 0.);
+
+
+int size_S1 = 14;
+S1_data = (float*)malloc(sizeof(float) * size_S1 * size_S1 * size_channel_c1); //1st average pool
+MatrixInit_value(S1_data, size_S1 * size_S1 * size_channel_c1, 0.);
+
+
+int size_c1_k = 5;
+C1_kernel = (float*)malloc(sizeof(float) * size_channel_c1 * size_c1_k * size_c1_k); //1st conv
+MatrixInit(C1_kernel, size_channel_c1 * size_c1_k * size_c1_k);
+printf("kernel \n");
+MatrixPrint(C1_kernel, 5, 5); // just print first 4 numbers
+printf("\n");
+
+
+float* C1_kernel_inter= (float*)malloc(sizeof(float)  * size_c1_k * size_c1_k); 
+for (int j = 0; j < size_c1_k * size_c1_k; j++) {
+	C1_kernel_inter[j] = C1_kernel[j];
+}
 
 
 
-	// ===>  Matrix MULT CPU
+// ====> 1st conv 
+
+cudaMalloc((void**)&d_raw_data, sizeof(float) * size_img * size_img);
+cudaMalloc((void**)&d_C1_kernel, sizeof(float) * size_c1_k * size_c1_k);
+cudaMalloc((void**)&d_C1_data, sizeof(float) * size_c1 * size_c1);
+
+cudaMemcpy(d_raw_data, raw_data, sizeof(float) * size_img * size_img, cudaMemcpyHostToDevice);
+cudaMemcpy(d_C1_kernel, C1_kernel, sizeof(float) * size_c1_k * size_c1_k, cudaMemcpyHostToDevice);
+
+
+int THREADS = 32;
+
+// Blocks per grid dimension (assumes THREADS divides N evenly)
+int BLOCKS = ceil(size_img / THREADS);
+
+
+// Use dim3 structs for block  and grid dimensions
+dim3 threads(THREADS, THREADS);
+dim3 blocks(BLOCKS, BLOCKS);
+
+// Launch kernel
+convolution_kernel<<<blocks, threads>>>(d_C1_data, d_raw_data, d_C1_kernel, size_img, 5);
+
+// ===> tanh 
+
+int NUM_THREADS = 1024;
+int NUM_BLOCKS = (size_c1 * size_c1 + NUM_THREADS - 1) / NUM_THREADS;
+activation_tanh<<<NUM_BLOCKS,NUM_THREADS>>>(d_C1_data, size_c1 * size_c1);
 
 
 
-	// Allocate memory
-	a1 = (float*)malloc(sizeof(float) * N * N);
-	b1 = (float*)malloc(sizeof(float) * N * N);
-	out1 = (float*)malloc(sizeof(float) * N * N);
-	out2 = (float*)malloc(sizeof(float) * N * N);
-	//MatrixInit(a1, N, N);
-	//MatrixInit(b1, N, N);
-	MatrixInit_value(a1, N, N, 1.);
-	MatrixInit_value(b1, N, N, 1.);
-	//b1[3] = 0.;
+cudaMemcpy(C1_data, d_C1_data, sizeof(float) * size_c1* size_c1, cudaMemcpyDeviceToHost);
 
-	MatrixInit_value(out1, N, N, 0.);
-	MatrixInit_value(out2, N, N, 0.);
+printf("1st conv \n");
 
-	MatrixMult(a1, b1, out1,N);
-
-	t = clock() - t;
-	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-	printf("mult took %f seconds to execute \n", time_taken);
-
-	t = clock();
+MatrixPrint(C1_data, 10, 10); // just print first 4 numbers
 
 
 
-	// ===>   Matrix MULT GPU
+//  ====> 1st Average pooling 
+
+float* S1_kernel;
+float* d_S1_kernel;
 
 
 
-	cudaMalloc((void**)&d_a1, sizeof(float) * N * N);
-	cudaMalloc((void**)&d_b1, sizeof(float) * N * N);
-	//cudaMalloc((void**)&d_out1, sizeof(float) * N * N);
-	cudaMalloc((void**)&d_out2, sizeof(float) * N * N);
+int size_S1_kernel = 2;
+S1_kernel = (float*)malloc(sizeof(float)  * size_S1_kernel * size_S1_kernel); //1st avg
 
-	cudaMemcpy(d_a1, a1, sizeof(float) * N*N, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_b1, b1, sizeof(float) * N*N, cudaMemcpyHostToDevice);
-	//int threads = 32;
-	//int blocks = (N + threads - 1) / threads;
-	int THREADS = 32;
-
-	// Blocks per grid dimension (assumes THREADS divides N evenly)
-	int BLOCKS = N / THREADS;
-	
-	// Use dim3 structs for block  and grid dimensions
-	dim3 threads(THREADS, THREADS);
-	dim3 blocks(BLOCKS, BLOCKS);
-
-	// Launch kernel
-	cudaMatrixMult<<<blocks, threads >>>(d_a1, d_b1, d_out2, N);
-
-	t = clock()-t;
-	time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-	printf("mult cuda took %f seconds to execute \n", time_taken);
-
-	cudaMemcpy(out2, d_out2, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
-	//test
-	float error = 0.;
-	/*
-	printf("res1\n");
-	MatrixPrint(a1, 2, 2); // just print first 4 numbers
-	printf("res2\n");
-	MatrixPrint(b1, 2, 2); // just print first 4 numbers
+MatrixInit_value(S1_kernel, size_S1_kernel * size_S1_kernel, 0.25); //init avg kernel
 
 
-	printf("res1\n");
-	MatrixPrint(out1, 2, 2); // just print first 4 numbers
-	printf("res2\n");
-	MatrixPrint(out2, 2, 2); // just print first 4 numbers
-	
-	for (int i = 0; i < N * N; i++) {
-		error = out1[i] - out2[i];
-		//printf("error %f\n", error);
-		//assert(fabs(error) < MAX_ERR);
-	}
-	//printf("error %f\n", error);
-	printf("MULT PASSED\n");
+cudaMalloc((void**)&d_S1_kernel, sizeof(float) * size_S1_kernel * size_S1_kernel);
+cudaMalloc((void**)&d_S1_data, sizeof(float) * size_c1 * size_c1);
+
+cudaMemcpy(d_C1_data, C1_data, sizeof(float) * size_c1 * size_c1, cudaMemcpyHostToDevice); //est-ce nécessaire ?
+cudaMemcpy(d_S1_kernel, S1_kernel, sizeof(float) * size_S1_kernel * size_S1_kernel, cudaMemcpyHostToDevice);
 
 
-	cudaFree(d_a1);
-	cudaFree(d_b1);
-	cudaFree(d_out2);
-	*/
+THREADS = 28; 
+
+// Blocks per grid dimension (assumes THREADS divides N evenly)
+BLOCKS = ceil(size_c1 / THREADS);
+
+
+// Use dim3 structs for block  and grid dimensions
+dim3 threads1(THREADS, THREADS);
+dim3 blocks1(BLOCKS, BLOCKS);
+
+// Launch kernel
+convolution_kernel <<<blocks1, threads1 >>>(d_S1_data, d_C1_data, d_S1_kernel, size_S1, 2);
+
+cudaMemcpy(S1_data, d_S1_data, sizeof(float) * size_S1 * size_S1, cudaMemcpyDeviceToHost);
+
+printf("1st avg pool \n");
+
+MatrixPrint(S1_data, 5, 5); // just print first 4 numbers
+
+cudaFree(d_C1_data);
+cudaFree(d_raw_data);
+cudaFree(d_C1_kernel);
 
 
 
-	// ===>   Matrix CONVOLUTION 2D GPU
-
-
-
+/*
 float* a2, * kernel, * out3, * out4;
 float* d_a2, * d_kernel, * d_out3, * d_out4;
+MatrixInit_value(a2, N, N, 1.);
 
 
 //clock_t t;
@@ -319,4 +306,5 @@ MatrixPrint(kernel, 7, 7); // just print first 4 numbers
 cudaFree(d_a2);
 cudaFree(d_kernel);
 cudaFree(d_out4);
+*/
 }
